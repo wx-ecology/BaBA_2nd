@@ -79,8 +79,7 @@ pronghorn <- read_csv("./data/01CleanedMovement/Animal_Location_All_clean.csv") 
   rename (date = Date, Animal.ID = Location.ID) %>% unique()
 pronghorn.info <- read_csv("./data/01CleanedMovement/Animal_Info_All.csv") %>% dplyr::select(Location.ID, Capture.Area, intervals) %>%
   rename (Animal.ID = Location.ID) 
-# make tracks
-pronghorn <- pronghorn %>% left_join(pronghorn.info) %>% filter(!is.na(date)) %>% mutate(date = as_datetime(date, tz = "US/Mountain")) 
+pronghorn <- pronghorn %>% left_join(pronghorn.info) %>% filter(!is.na(date))
 
 pronghorn.2h <- pronghorn %>% filter(intervals == 2)
 pronghorn.2h.tr <- as.ltraj(xy = as.data.frame(pronghorn.2h[, c("Easting", "Northing")]), 
