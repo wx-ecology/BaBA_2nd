@@ -17,15 +17,13 @@ fence.sp <- spTransform(fence.sp, CRS(target.crs))
 # get brief BaBA (identify Quick Corss only) result.
 for (d in c(50,60,70,80,91,100,110,120,130,141,150)) {
   BaBA.d <- BaBA_QC(animal = pronghorn.sp, barrier = fence.sp, d = d, interval =2, units = "hours")  
-  writeOGR(BaBA.d$encounters, paste0("./result/BaBA/BaBA_d", d, ".shp"), paste0("BaBA_d",d), driver = "ESRI Shapefile")
-  write_csv(BaBA.d$classification, paste0("./result/BaBA/BaBA_d",d, ".csv"))
+  writeOGR(BaBA.d$encounters, paste0("./result/BaBA_QC/BaBA_d", d, ".shp"), paste0("BaBA_d",d), driver = "ESRI Shapefile")
+  write_csv(BaBA.d$classification, paste0("./result/BaBA_QC/BaBA_d",d, ".csv"))
 }
 
 # calculate # of Quick Cross across individuals at each buffer distance.
-path <- paste0(getwd(), "/result/BaBA/")
+path <- paste0(getwd(), "/result/BaBA_QC/")
 files <- dir(path = path, recursive = FALSE, pattern = "*\\.csv") #get all files in directory
-
-
 QC_summary <- data.frame(NULL)
 for (x in files) {
   d <- (x %>% str_split("_d") %>% unlist() %>% str_split("\\.") %>% unlist())[2]
@@ -35,5 +33,10 @@ for (x in files) {
     summarise( n = n()) %>% mutate (d = as.numeric(d))
   QC_summary <- rbind(QC_summary, n)
 }
-d_max <- QC_summary %>% filter(n == max(n)) %>% select(d)
 
+d_max <- QC_summary %>% filter(n == max(n)) %>% select(d)
+# 110 
+
+BaBA.d <- BaBA(animal = pronghorn.sp, barrier = fence.sp, d = d_max, interval =2, units = "hours")  
+writeOGR(BaBA.d$encounters, paste0("./result/BaBA/BaBA_d", d_max, ".shp"), paste0("BaBA_d",d_max), driver = "ESRI Shapefile")
+write_csv(BaBA.d$classification, paste0("./result/BaBA/BaBA_d",d_max, ".csv"))
