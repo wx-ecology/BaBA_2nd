@@ -1,0 +1,199 @@
+---
+title: "3_stats_analyses"
+author: "Wenjing"
+date: "8/23/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+setwd("/Users/Mushy 1/Google Drive (wenjing.xu@berkeley.edu)/RESEARCH/Pronghorn/BaBA_Season2")
+library(tidyverse)
+library(amt)
+library(cowplot)
+library(hrbrthemes)
+
+# raw movement data
+pronghorn <- read_csv("./data/pronghorn_2h_pts.csv") %>% mutate(date = ymd_hms(date, tz = "US/Mountain")) %>% filter(!is.na(date))
+ids <- unique(pronghorn$Animal.ID)
+# animal info 
+pronghorn.info <- read_csv("./data/01CleanedMovement/Animal_Info_All.csv") %>% filter(Location.ID %in% ids)
+# baba at d = 110
+pronghorn.baba <- read_csv("./result/BaBA/BaBA_110.csv")
+```
+
+## Introduction
+We ask: is there specialization in ungulate barrier behavior? (can be studied through examining among-individual variation and within-individual consistency)
+## Method
+
+This analysis attemps to understand primary factors determining barrier behaviors. 
+
+First, we show that individual BaB variations exist. We provide descriptive stats to show different groups show different BaB (BOX PLOT % non-optimal BaB, total encounters). 
+
+- This step we will use BaB triggerd by all fences.
+
+Then, we examine the factors influencing BaB among individuals. Model % non-optimal and total encounter as a function of
+*1) Fence-identity-theory*
+1.1 Fence structure (meshed v.s. barbed OR bottom wire height?)
+1.2 Fence location (pri-pub, pri-pri,pub-pub; average slope within buffer; distance to paved road). Make sure none of them are water border fence.
+*2) Movement-behavior-syndrome-theory*
+2.1 Movement displacement (or use package MARCHER to distinguish residents v.s. migrants, Gurarie et al., 2017)
+2.2 accumulated movement distance
+2.3 Animal movement "efficiency" (displacement/accumulated movement distance ratio) 
+*Include year as random intercept*
+
+- This step we will use measured fences.
+- calculated robust SE and 95% CI of parameters using generalised estimating equations, because of temporal autocorrelation and a lack of independence within individual movements (Craiu et al. 2008)
+- Identifying fences and encounter events relevant to them is important (all encounter events within 110 m buffer of the measured segment?)
+
+Finally, permutation test to examine if 
+1) whether there are good years and bad years for animals to BaB (need to read into this)
+
+**scale and center all variables**
+
+## Method
+```{r animal dataset}
+length(unique(pronghorn$Animal.ID)) #63 individuals
+
+### plot data availabilty
+pronghorn.info %>% arrange(begin) %>% mutate(Location.ID=factor(Location.ID, Location.ID)) %>% ggplot +
+  geom_segment( aes(x=Location.ID, xend=Location.ID, y=as.Date(begin), yend=as.Date(end), color=Capture.Area)) +
+  geom_point( aes(x=Location.ID, y=as.Date(begin)), color=rgb(0.1,0.1,0.1,0.5), size=2 ) +
+  geom_point( aes(x=Location.ID, y=as.Date(end)), color=rgb(0.1,0.1,0.1,0.5), size=2.5, shape = 18 ) +
+  scale_y_date(date_labels = "%Y", date_breaks = "1 year") + 
+  coord_flip() +
+  theme_ipsum() +
+  theme(
+    legend.position = c(0.8,0.2),
+  ) +
+  xlab("ID") +
+  ylab("Date")
+```
+
+```{r basic movement pattern}
+pronghorn.trk <- pronghorn %>% make_track(Easting, Northing, date, id = Animal.ID) %>% 
+  nest(data = -'id')
+pronghorn.step <- pronghorn.trk %>%
+  mutate(steps = 
+           map(data, function(x) 
+             x %>% track_resample(rate = minutes(120), tolerance = minutes(5)) %>% steps_by_burst()),
+         nsd = 
+           map(data, function(x)   x%>%nsd()))
+step_sum <- pronghorn.step %>% select(id, steps) %>% unnest(cols = steps) %>% group_by(id) %>% summarise(total_step_lengths = sum(sl_))
+nsd_sum <- pronghorn.step %>% select(id, nsd) %>% unnest_longer(nsd) %>% group_by(id) %>% summarise(max_displacement = sqrt(max(nsd)))
+
+pronghorn.sum <- pronghorn.info %>% dplyr::select(Location.ID, Capture.Area) %>% 
+  rename (id = Location.ID) %>% left_join(step_sum) %>% left_join(nsd_sum) %>% filter(!is.na(total_step_lengths))
+
+# # of individuals in each capture area
+table((pronghorn.sum %>% select (id, Capture.Area) %>% unique())$Capture.Area)
+
+## now have a quick look on their basic movement stats (total step length, maximal net squared displacement)
+p1 <- pronghorn.sum %>% pivot_longer(c(total_step_lengths, max_displacement), names_to = 'stats', values_to = 'value') %>% filter (stats == "total_step_lengths") %>%
+  ggplot(aes(value/1000, fill = factor(Capture.Area), color = factor(Capture.Area))) + geom_density(alpha = 0.4) +
+  theme_minimal_hgrid() +
+  theme(legend.position = 'none') +
+  labs ( x = "Total step length (km)")
+
+p2 <- pronghorn.sum %>% pivot_longer(c(total_step_lengths, max_displacement), names_to = 'stats', values_to = 'value') %>% filter (stats == "max_displacement") %>%
+  ggplot(aes(value/1000, fill = factor(Capture.Area), color = factor(Capture.Area))) + geom_density(alpha = 0.4) +
+  theme_minimal_hgrid() +
+  theme(legend.title = element_blank()) +
+  theme(legend.position = c(0.6, 0.8)) +
+  labs ( x = "Max NSD (km)")
+
+plot_grid(p1, p2, labels = c('A', 'B'), label_size = 12)
+```
+
+```{r baba variability across individuals}
+# we need to show, for animals that wintering at the same place and moving for similar distance across the year their BaBA varies. Thus, there are other factors influencing animals responses to barriers.
+
+baba.summary <- pronghorn.baba %>% mutate(yr = year(start_time), mo = month(start_time)) %>% select(AnimalID, yr, mo, eventTYPE)
+
+# plot - fence encounters over months across individuals
+baba.summary %>% filter(yr == 2014 | yr == 2016) %>% group_by(AnimalID, mo) %>% summarise( n = n()) %>% 
+  ggplot (aes(x = factor(mo), y = n)) +
+  geom_boxplot() + 
+  theme_minimal_hgrid() ## total fence encounter shows strong seasonal variation 
+
+## plot - baba over months across individuals
+baba.summary %>% filter(yr == 2014 | yr == 2016) %>% group_by(AnimalID, mo, eventTYPE) %>% summarise( n = n()) %>% 
+  ggplot (aes(x = factor(mo), y = n, fill = eventTYPE)) +
+  geom_boxplot() + 
+  theme_minimal_hgrid() ## Quick cross might be the most sensitive to seasonal changes 
+  
+## plot - % optimal behavior over months
+baba.summary %>% filter(yr == 2014 | yr == 2016) %>%  filter(eventTYPE != "unknown") %>% 
+  group_by(AnimalID, mo, eventTYPE) %>% 
+  summarise( n = n()) %>%
+  pivot_wider(names_from = eventTYPE, values_from = n) %>% 
+  replace(is.na(.), 0) %>%
+  mutate (perc_opt = (Average_Movement + Quick_Cross)/ (Bounce + Trapped + Average_Movement + Quick_Cross)) %>%
+  ggplot(aes(x = factor(mo), y = perc_opt)) +
+  geom_boxplot() +
+  theme_minimal_hgrid() # seems to be less variable than # of encounter events - this means something about animals' ability to cross barriers
+
+## plot - total encounter events in difference herds (box plot)
+baba.summary %>% filter(yr == 2014 | yr == 2016) %>% 
+  group_by(AnimalID, mo) %>% 
+  summarise( n = n()) %>% 
+  left_join(pronghorn.info %>% rename (AnimalID = Location.ID) %>% select (AnimalID, Capture.Area)) %>%
+  ggplot(aes(x = factor(Capture.Area), y = n)) +
+  geom_boxplot() +
+  theme_minimal_hgrid()
+
+## plot - % optimal behavior in difference herds (box plot)
+baba.summary %>% filter(yr == 2014 | yr == 2016) %>% filter(eventTYPE != "unknown") %>% 
+  group_by(AnimalID, mo, eventTYPE) %>% 
+  summarise( n = n()) %>% 
+  left_join(pronghorn.info %>% rename (AnimalID = Location.ID) %>% select (AnimalID, Capture.Area)) %>%
+  pivot_wider(names_from = eventTYPE, values_from = n) %>% 
+  replace(is.na(.), 0) %>%
+  mutate (perc_opt = (Average_Movement + Quick_Cross)/ (Bounce + Trapped + Average_Movement + Quick_Cross)) %>%
+  ggplot(aes(x = factor(Capture.Area), y = perc_opt)) +
+  geom_boxplot() +
+  theme_minimal_hgrid()  # might not have so much of a herd differences. 
+
+## plot - # of encounter event in relationship with movement distance 
+## plot - # of encounter event v.s. displacement
+## plot - % opt in relationship with displacement/accumulated distance ratio 
+
+## permutation test to show whether 2014 and 2016 animals cross barriers differently 
+
+## permutation test to show whether one herd perform consistently better than the other herds
+
+### can permutation test be used to show whether some individuals are consistently better or worse?? 
+
+m1 <- lmer(%optimal ~ month + I(month^2) + 
+             (1|herd) + (1|year/month), data)
+# from this we can calculate the repeatibility of bab in the same herd. how much of the residual variance can be attributed to herd difference.  -- this would suggest social interactions plays a role in barrier behaviors.
+
+```
+
+```{r baba as behavior syndrome of movement tactics}
+# need to read more about why and whether it matters 
+```
+
+
+```{r factors influencing bab}
+
+```
+
+ 
+## Including Plots
+
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+##Discussion
+Is BaB cause or consequence of movement?
+
+## note 
+something might be fun to try:
+1) behavior repeatability analyses (rptR package)
+2) trajectory similarity measures (https://link.springer.com/article/10.1007/s00265-019-2761-1)
