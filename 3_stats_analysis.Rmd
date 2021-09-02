@@ -20,7 +20,7 @@ ids <- unique(pronghorn$Animal.ID)
 # animal info 
 pronghorn.info <- read_csv("./data/01CleanedMovement/Animal_Info_All.csv") %>% filter(Location.ID %in% ids)
 # baba at d = 110
-pronghorn.baba <- read_csv("./result/BaBA/BaBA_110.csv")
+pronghorn.baba <- read_csv("./result/BaBA/BaBA_d110max1.csv")
 ```
 
 ## Introduction
@@ -109,85 +109,161 @@ plot_grid(p1, p2, labels = c('A', 'B'), label_size = 12)
 ```{r baba variability across individuals}
 # we need to show, for animals that wintering at the same place and moving for similar distance across the year their BaBA varies. Thus, there are other factors influencing animals responses to barriers.
 
-baba.summary <- pronghorn.baba %>% mutate(yr = year(start_time), mo = month(start_time)) %>% select(AnimalID, yr, mo, eventTYPE)
+baba.summary <- pronghorn.baba %>% mutate(yr = year(start_time), mo = month(start_time)) %>% select(AnimalID, yr, mo, eventTYPE) %>%
+ filter(yr == 2014 | yr == 2016) %>% group_by(AnimalID, mo, yr, eventTYPE) %>% summarise( n = n()) 
 
-# plot - fence encounters over months across individuals
-baba.summary %>% filter(yr == 2014 | yr == 2016) %>% group_by(AnimalID, mo) %>% summarise( n = n()) %>% 
-  ggplot (aes(x = factor(mo), y = n)) +
-  geom_boxplot() + 
-  theme_minimal_hgrid() ## total fence encounter shows strong seasonal variation 
+# # plot - fence encounters over months across individuals
+# baba.summary %>% 
+#   ggplot (aes(x = factor(mo), y = n)) +
+#   geom_boxplot() + 
+#   theme_minimal_hgrid() ## total fence encounter shows strong seasonal variation 
 
 ## plot - baba over months across individuals
-baba.summary %>% filter(yr == 2014 | yr == 2016) %>% group_by(AnimalID, mo, eventTYPE) %>% summarise( n = n()) %>% 
+baba.summary %>% 
   ggplot (aes(x = factor(mo), y = n, fill = eventTYPE)) +
   geom_boxplot() + 
   theme_minimal_hgrid() ## Quick cross might be the most sensitive to seasonal changes 
   
-## plot - % optimal behavior over months
-baba.summary %>% filter(yr == 2014 | yr == 2016) %>%  filter(eventTYPE != "unknown") %>% 
-  group_by(AnimalID, mo, eventTYPE) %>% 
-  summarise( n = n()) %>%
+baba.summary.mo <- baba.summary %>%
+  left_join(pronghorn.info %>% rename (AnimalID = Location.ID) %>% select (AnimalID, Capture.Area)) %>% 
   pivot_wider(names_from = eventTYPE, values_from = n) %>% 
   replace(is.na(.), 0) %>%
-  mutate (perc_opt = (Average_Movement + Quick_Cross)/ (Bounce + Trapped + Average_Movement + Quick_Cross)) %>%
+  mutate (perc_opt = (Average_Movement + Quick_Cross)/ (Bounce + Trapped + Average_Movement + Quick_Cross), 
+          total = Bounce + Trapped + Average_Movement + Quick_Cross) 
+
+#get rid of the measures that the total # encounter is below 25% 
+quantile(baba.summary.mo$total)
+baba.summary.mo <- baba.summary.mo %>% filter(total >= 11)
+
+## plot - % optimal behavior over months
+baba.summary.mo %>%
   ggplot(aes(x = factor(mo), y = perc_opt)) +
   geom_boxplot() +
   theme_minimal_hgrid() # seems to be less variable than # of encounter events - this means something about animals' ability to cross barriers
 
-## plot - total encounter events in difference herds (box plot)
-baba.summary %>% filter(yr == 2014 | yr == 2016) %>% 
-  group_by(AnimalID, mo) %>% 
-  summarise( n = n()) %>% 
-  left_join(pronghorn.info %>% rename (AnimalID = Location.ID) %>% select (AnimalID, Capture.Area)) %>%
-  ggplot(aes(x = factor(Capture.Area), y = n)) +
-  geom_boxplot() +
-  theme_minimal_hgrid()
+# ## plot - total encounter events in difference herds (box plot)
+# baba.summary %>% 
+#   left_join(pronghorn.info %>% rename (AnimalID = Location.ID) %>% select (AnimalID, Capture.Area)) %>%
+#   ggplot(aes(x = factor(Capture.Area), y = n)) +
+#   geom_boxplot() +
+#   theme_minimal_hgrid()
 
 ## plot - % optimal behavior in difference herds (box plot)
-baba.summary %>% filter(yr == 2014 | yr == 2016) %>% filter(eventTYPE != "unknown") %>% 
-  group_by(AnimalID, mo, eventTYPE) %>% 
-  summarise( n = n()) %>% 
-  left_join(pronghorn.info %>% rename (AnimalID = Location.ID) %>% select (AnimalID, Capture.Area)) %>%
-  pivot_wider(names_from = eventTYPE, values_from = n) %>% 
-  replace(is.na(.), 0) %>%
-  mutate (perc_opt = (Average_Movement + Quick_Cross)/ (Bounce + Trapped + Average_Movement + Quick_Cross)) %>%
+baba.summary.mo %>%
   ggplot(aes(x = factor(Capture.Area), y = perc_opt)) +
   geom_boxplot() +
   theme_minimal_hgrid()  # might not have so much of a herd differences. 
+
+## plot - % optimal behavior in different individuals organized by mean %opti
+baba.perc.mean <- baba.summary.mo %>% group_by(AnimalID) %>% summarise(mu = mean(perc_opt), median = median(perc_opt))
+
+baba.summary.mo %>% select(AnimalID, mo, perc_opt) %>% 
+  left_join(baba.perc.mean) %>%
+  arrange(mu) %>%
+  mutate(AnimalID = factor(AnimalID, levels = unique(as.character(c$AnimalID)))) %>% 
+  ggplot(aes(x = AnimalID, y = perc_opt)) +
+  geom_boxplot() +
+  theme_ipsum() +
+  theme(axis.text.x=element_blank()) # we cam see there are individual differences in barrier performance. Some indivuals seem to be always better than other individuals 
+```
+
+```{r examine how much observed variances are caused by inter-individual variabilities}
+library(lme4)
+library(MuMIn)
+
+m1 <- lmer(perc_opt ~ mo + I(mo^2) + Capture.Area +
+             (1|AnimalID) + (1|yr/mo), baba.summary.mo)
+par(mar=c(2,2,2,2)); qqnorm(residuals(m1),main =NULL) #a good qqplot!
+
+summary(m1)
+r.squaredGLMM(m1) # marginal r2 represents the varianceexplainedby the fixed effects, and the conditional r2 represents variance explained by the entire model
+# 
+# m2 <- lmer(perc_opt ~ mo + I(mo^2)  +
+#              (1|AnimalID) + (1|Capture.Area) + (1|yr/mo), baba.summary.mo)
+# par(mar=c(2,2,2,2)); qqnorm(residuals(m2,main =NULL)) #a good qqplot!
+# 
+# summary(m2)
+# r.squaredGLMM(m2) 
+
+ggplot(baba.summary.mo,
+aes(x = mo, y = perc_opt, color = Capture.Area)) +
+geom_jitter(size=0.5) +
+geom_line(aes(y = predict(m1,re.form = NA)),size=1.5) + theme_classic()+
+ylab("Barrier performance") + scale_x_continuous(breaks = seq(1,12,1))
+
+## Below shows the prediction lines for each individual and year combination (Fig 7). Some individuals are predicted to move consistently less and others are predicted to move consistently more.
+pr <- data.frame(AnimalID = baba.summary.mo$AnimalID, 
+                 mo = baba.summary.mo$mo, yr = baba.summary.mo$yr)
+pr$fit <- predict(m1)
+ggplot() +
+  geom_line(data = pr, 
+            aes(x = mo, 
+                y = pr[,"fit"], 
+                group = AnimalID,
+                color = AnimalID), size=0.3)+ 
+  labs(y = "Predicted ba performance (km)",color = "AnimalID")+
+  theme_classic()+
+  theme(legend.position="none")+
+  guides(color = guide_legend(nrow = 4))+
+  scale_x_continuous(breaks = seq(1,12,1))  ## the predict graph confirmed that some animals always perform better than others
+
+## now calculate repeatibility, i.e. variance standardized individual variation in focal behavior. 
+## divide the variance explained by AnimalID by the total phenotypic variance (AnimalID + mo:yr + yr + residual variance).
+VarCorr(m1)$"AnimalID"[1] / 
+  (VarCorr(m1)$"AnimalID"[1] + 
+     VarCorr(m1)$"mo:yr"[1] + 
+     VarCorr(m1)$"yr"[1] + 
+     attr(VarCorr(m1), "sc")^2)
+
+VarCorr(m1)$"mo:yr"[1] / 
+  (VarCorr(m1)$"AnimalID"[1] + 
+     VarCorr(m1)$"mo:yr"[1] + 
+     VarCorr(m1)$"yr"[1] + 
+     attr(VarCorr(m1), "sc")^2)
+
+VarCorr(m1)$"yr"[1] / 
+  (VarCorr(m1)$"AnimalID"[1] + 
+     VarCorr(m1)$"mo:yr"[1] + 
+     VarCorr(m1)$"yr"[1] + 
+     attr(VarCorr(m1), "sc")^2)
+
+## simulate our model 1000 times in order to get a posterior distribution for all variance components, which we can use to calculate credible intervals and infer significance.
+set.seed(1)
+simulated <- sim(m1, n.sim = 1000)
+posterior_animal_id <- apply(simulated@ranef$"AnimalID"[ , , 1],1,var) 
+posterior_yearmonth <- apply(simulated@ranef$"mo:yr"[ , , 1],1,var) 
+posterior_year <- apply(simulated@ranef$"yr"[ , , 1],1,var) 
+posterior_residual <- simulated@sigma^2
+quantile(posterior_animal_id /
+(posterior_animal_id + posterior_yearmonth + posterior_year + posterior_residual),
+prob=c(0.025, 0.5, 0.975)) 
+# on average 14% of the remaining variance (after controlling for month) in barrier performance can be attributed to differences between individuals. This means that some pronghorn always perform worse compared to other individuals and this difference is not caused by predictable monthly variation
+quantile(posterior_year /
+(posterior_animal_id + posterior_yearmonth + posterior_year + posterior_residual),
+prob=c(0.025, 0.5, 0.975))
+## there seem to be little year effect on barrier performance
+
+```
+
+```{r baba as behavior syndrome of movement tactics}
+## follow hertel method
+
+## The state of the art approach for analyzing behavioral syndromes are multivariate mixed models which can cope with multiple response variables at the same time and estimate their correlation on the random effect (e.g. individual) level. 
+
 
 ## plot - # of encounter event in relationship with movement distance 
 ## plot - # of encounter event v.s. displacement
 ## plot - % opt in relationship with displacement/accumulated distance ratio 
 
-## permutation test to show whether 2014 and 2016 animals cross barriers differently 
 
-## permutation test to show whether one herd perform consistently better than the other herds
-
-### can permutation test be used to show whether some individuals are consistently better or worse?? 
-
-m1 <- lmer(%optimal ~ month + I(month^2) + 
-             (1|herd) + (1|year/month), data)
-# from this we can calculate the repeatibility of bab in the same herd. how much of the residual variance can be attributed to herd difference.  -- this would suggest social interactions plays a role in barrier behaviors.
-
-```
-
-```{r baba as behavior syndrome of movement tactics}
 # need to read more about why and whether it matters 
+
+
 ```
 
 
 ```{r factors influencing bab}
 
-```
-
- 
-## Including Plots
-
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
 ```
 
 ##Discussion
