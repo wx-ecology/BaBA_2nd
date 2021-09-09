@@ -13,6 +13,7 @@ library(tidyverse)
 library(amt)
 library(cowplot)
 library(hrbrthemes)
+library(lubridate)
 
 # raw movement data
 pronghorn <- read_csv("./data/pronghorn_2h_pts.csv") %>% mutate(date = ymd_hms(date, tz = "US/Mountain")) %>% filter(!is.na(date))
