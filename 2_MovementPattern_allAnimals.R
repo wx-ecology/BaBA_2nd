@@ -19,7 +19,10 @@ pronghorn <- read_csv("./data/pronghorn_2h_pts.csv") %>%
          yr = year(date),
          dy = day(date),
          id_mo = paste0(Animal.ID, "-", mo)) %>% 
-  filter(!is.na(date), (yr == 2014 | yr == 2016)) 
+  filter(!is.na(date), (yr == 2014 | yr == 2016)) %>%
+  filter(Animal.ID != "PAPO_138") %>%
+  filter(id_mo == c("PAPO_163-1", "PAPO_163-2", 
+                    "PAPO_164-1", "PAPO_164-2")) #BAD GPS DATA
 # remove individual month that is not complete (less than 300 data points)
 pronghorn1 <- pronghorn %>% select(id_mo, dy) %>% 
   group_by(id_mo) %>% 
@@ -131,7 +134,7 @@ pronghorn <- pronghorn %>% group_by(id_mo) %>%
 
 # for each animal-month, run bbmm and get line density within the 99% BBMM
 hr_fence_density <- data.frame() # create an empty list for density
-for (i in unique(pronghorn$id_mo)){
+for (i in unique(pronghorn$id_mo)[669:length(unique(pronghorn$id_mo))]){
   animal.i <- pronghorn %>% filter(id_mo == i)
   
   BBMM = brownian.bridge(x=animal.i$Easting, y=animal.i$Northing, 
@@ -159,8 +162,10 @@ for (i in unique(pronghorn$id_mo)){
   print(i)
 }
 
+pronghorn.sum <- hr_fence_density %>% separate(id_mo, sep = "-", c("id", "mo")) %>%
+  mutate(mo = as.double(mo)) %>% right_join(pronghorn.sum)
 
-
+write.csv(pronghorn.sum, "./result/prong_df_glmm.csv")
 ##############################################
 ############## intial visualization ##########
 ##############################################
@@ -169,10 +174,10 @@ pronghorn.sum %>%
   ggplot (aes(x = max_displacement, y = normal_rate)) +
   geom_point() + 
   geom_smooth(method = "lm") +
-  theme_minimal_hgrid() 
+  theme_minimal() 
 
 pronghorn.sum %>% 
-  ggplot (aes(x = total_step_lengths, y = crossing_rate)) +
+  ggplot (aes(x = total_step_lengths, y = normal_rate)) +
   geom_point() + 
   geom_smooth(method = "lm") +
-  theme_minimal_hgrid() 
+  theme_minimal() 
