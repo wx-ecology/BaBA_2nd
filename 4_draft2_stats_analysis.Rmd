@@ -1,0 +1,72 @@
+---
+title: "4_draft2_variabilty_analysis"
+author: "Wenjing"
+date: "9/22/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+setwd("/Users/Mushy 1/Google Drive (wenjing.xu@berkeley.edu)/RESEARCH/Pronghorn/BaBA_Season2")
+library(tidyverse)
+library(cowplot)
+library(hrbrthemes)
+library(lubridate)
+library(ggplot2)
+
+# pronghorn monthly data ready for individuality analysis
+pronghorn <- read_csv("./result/prong_df_glmm.csv") %>% mutate(mo = as.numeric(mo), yr = as.numeric(yr))
+summary(pronghorn$total_encounter) # some id-mo has no fence encounters, delete. Also delete id-mo that has only 1 total encounter
+pronghorn <- pronghorn %>% filter(!is.na(total_encounter), total_encounter > 1) 
+length(unique(pronghorn$id_yr_mo)) # 815 id_mo left
+table(pronghorn$id,
+      pronghorn$mo)
+```
+
+```{r data exploration and cleaning}
+## steps following Zuur et al 2009
+# step 1 - outliers using cleveland dotplot 
+ggplot(pronghorn, aes(x = normal_rate, y = id_yr_mo)) + geom_point() + theme(axis.text.y=element_blank())
+ggplot(pronghorn, aes(x = crossing_rate, y = id_yr_mo)) + geom_point() + theme(axis.text.y=element_blank())
+ggplot(pronghorn, aes(x = total_step_lengths, y = id_yr_mo)) + geom_point() + theme(axis.text.y=element_blank()) # need to remote the rows where step length is super small
+ggplot(pronghorn, aes(x = max_displacement, y = id_yr_mo)) + geom_point() + theme(axis.text.y=element_blank()) # need to remote the rows where max displacement is super small
+ggplot(pronghorn, aes(x = fence_density, y = id_yr_mo)) + geom_point() + theme(axis.text.y=element_blank())
+
+### <<----- need to do a sensitivity analysis to see whether filtering total encounter rate affect results ------------>>
+
+# step 2 - homogeneity of variance - will be done using residual of the model 
+# step 3 - normality - make histagram of residuals to check normality 
+# step 4 - are they 0-inflated? - no 
+# step 5 - is there colinearity among the covariates? 
+
+
+
+```
+
+## Behavior repeatability
+
+We predict that, while controlling for fence density, a significant part of the remaining variance would be attributed to repeatable between-individual variation in behavior. If supported, this would suggest that, despite different barrier constrains, individual pronghorn consistently express higher or lower barrier performance. 
+
+To test this, we first fitted univariate linear mixed model for each behavior. We used data from `r length(unique(pronghorn$id))` female pronghorn across year `r (unique(pronghorn$yr))`. We only include the individual_mo if they have at least 28 days of data. 
+
+```{r behavior repeatability}
+library(lme4)
+# we fit pronghorn identity (id) and study year (yr) as random intercepts. we control for months and fence density as fixed effect. 
+m1 <- lmer(crossing_rate ~ mo + )
+
+# we access temporal autocorrelation remianing in the model residuals for each pronghorn and year. 
+
+#from the individual miixed-effect models, we estimated the population level adjusted between-individual repeatability, CI, and significance level, of each behavior using rptR package.
+
+```
+
+## landscape-scale behavior syndrome
+
+We further predict that, barrier behavior and movement behavior will form a behavioral syndrome, where individuals that are better at crossing fences can move farther. If supported, such a syndrome would mean that pronghorn's movement pattern largely correlates with their abilities to cross barriers. 
+
+```{r behaviral syndrome}
+plot(pressure)
+```
+
+## determinants of barrier performance at the local scale 
