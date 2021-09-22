@@ -5,7 +5,9 @@
 ########### set up  ############
 ################################
 
-setwd("/Users/Mushy 1/Google Drive (wenjing.xu@berkeley.edu)/RESEARCH/Pronghorn/BaBA_Season2")
+setwd("G:/My Drive/RESEARCH/Pronghorn/BaBA_Season2/")
+setwd("/Users/Mushy 1/Google Drive (wenjing.xu@berkeley.edu)/RESEARCH/Pronghorn/BaBA_Season2/")
+
 library(tidyverse)
 library(amt)
 library(hrbrthemes)
@@ -18,25 +20,25 @@ pronghorn <- read_csv("./data/pronghorn_2h_pts.csv") %>%
          mo = month(date),
          yr = year(date),
          dy = day(date),
-         id_mo = paste0(Animal.ID, "-", mo)) %>% 
-  filter(!is.na(date), (yr == 2014 | yr == 2016)) %>%
-  filter(Animal.ID != "PAPO_138") %>%
-  filter(id_mo == c("PAPO_163-1", "PAPO_163-2", 
-                    "PAPO_164-1", "PAPO_164-2")) #BAD GPS DATA
-# remove individual month that is not complete (less than 300 data points)
-pronghorn1 <- pronghorn %>% select(id_mo, dy) %>% 
-  group_by(id_mo) %>% 
-  summarise(n = length(unique(dy))) %>% filter(n >=28)
-id_mo_complete <- pronghorn1$id_mo
-pronghorn <- pronghorn %>% filter(id_mo %in% id_mo_complete)
+         id_yr_mo = paste0(Animal.ID, "-", yr, "-", mo)) %>% 
+  # filter(!is.na(date), (yr == 2014 | yr == 2016)) %>%   ##### why did I only select 2014 and 2016? it might not be necessary
+  filter(!is.na(date)) 
+#  filter(Animal.ID != "PAPO_138")
 
-length(unique(pronghorn$Animal.ID)) #60
-length(unique(pronghorn$id_mo)) #678
+# remove individual month that is not complete (at least have 28-day data in a month)
+pronghorn1 <- pronghorn %>% dplyr::select(id_yr_mo, dy) %>% 
+  group_by(id_yr_mo) %>% 
+  summarise(n = length(unique(dy))) %>% filter(n >=28)  #filtered out 114
+id_mo_complete <- pronghorn1$id_yr_mo #855
+pronghorn <- pronghorn %>% filter(id_yr_mo %in% id_mo_complete)
+
+length(unique(pronghorn$Animal.ID)) #62
+length(unique(pronghorn$id_yr_mo)) #855
 
 # animal info 
 ids <- unique(pronghorn$Animal.ID)
 pronghorn.info <- read_csv("./data/01CleanedMovement/Animal_Info_All.csv") %>% filter(Location.ID %in% ids) 
-rm(ids)
+rm(ids, pronghorn1)
 
 
 ################################
@@ -45,7 +47,7 @@ rm(ids)
 
 # make movement tracks for each animal_month and calculate monthly step length and max nsd
 pronghorn.trk <- pronghorn %>% 
-  make_track(Easting, Northing, date, id = id_mo) %>% 
+  make_track(Easting, Northing, date, id = id_yr_mo) %>% 
   nest(data = -'id')
 
 pronghorn.step <- pronghorn.trk %>%
@@ -64,17 +66,27 @@ nsd_sum <- pronghorn.step %>% unnest_longer(nsd) %>%
   group_by(id) %>% summarise(max_displacement = sqrt(max(nsd)))
 
 # merge with animal info
-pronghorn.sum <- step_sum %>% left_join(nsd_sum) %>% separate (id, c("id", "mo"), sep = "-")
+pronghorn.sum <- step_sum %>% left_join(nsd_sum) %>% separate (id, c("id", "yr", "mo"), sep = "-")
 pronghorn.sum <- pronghorn.info %>% dplyr::select(Location.ID, Capture.Area) %>% 
-  rename (id = Location.ID) %>% left_join(pronghorn.sum) 
+  rename (id = Location.ID) %>% left_join(pronghorn.sum) %>% 
+  mutate(id_yr_mo = paste0(id, "-", yr, "-", mo)) 
+
+# pronghorn.sum <- pronghorn.sum %>% mutate(id_yr_mo = paste0(id, "-", yr, "-", mo)) %>% 
+#   left_join(pronghorn %>% dplyr::select(id_yr_mo))
 rm(step_sum, nsd_sum)
+
+################################
+########  add baba info ########
+################################
 
 ## add baba info (baba at d = 110)
 pronghorn.baba <- read_csv("./result/BaBA/BaBA_d110max1.csv") %>% 
-  select(AnimalID, start_time, eventTYPE) %>%
-  mutate(mo = month(start_time)) %>% 
+  dplyr::select(AnimalID, start_time, eventTYPE) %>%
+  mutate(mo = month(start_time),
+         yr = year(start_time)) %>% 
   rename(id = AnimalID) %>% 
-  group_by(id, mo, eventTYPE) %>% 
+  mutate(id_yr_mo = paste0(id,"-",yr, "-", mo)) %>%
+  group_by(id_yr_mo, eventTYPE) %>% 
   summarise( n = n()) %>% #summarize # of event each month
   pivot_wider(names_from = eventTYPE, values_from = n, values_fill = 0) %>% 
   mutate (total_encounter = 
@@ -86,18 +98,21 @@ pronghorn.baba <- read_csv("./result/BaBA/BaBA_d110max1.csv") %>%
           crossing_rate =
             Quick_Cross/total_encounter_known, 
           normal_rate =
-            (Average_Movement + Quick_Cross)/total_encounter_known) 
+            (Average_Movement + Quick_Cross)/total_encounter_known)  # n = 688
+
+# filter out animals that do not have complete montly data
+pronghorn.baba <- pronghorn.baba %>% filter(id_yr_mo %in% id_mo_complete) # n = 670
 
 summary(pronghorn.baba$unknown_rate) # low unknown rate. should be fine.
 # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
-# 0.00000 0.00000 0.00000 0.02963 0.04545 0.33333 
+# 0.00000 0.00000 0.00000 0.02674 0.04348 0.33333 
 
+# combine dataframes
 pronghorn.sum <- pronghorn.baba %>%
-  select(id, mo, total_encounter, crossing_rate, normal_rate) %>% 
-  mutate(mo = as.character(mo)) %>% 
-  right_join(pronghorn.sum, by = c("id", "mo")) %>% 
+  dplyr::select(id_yr_mo, total_encounter, crossing_rate, normal_rate) %>% 
+  right_join(pronghorn.sum, by = c("id_yr_mo")) %>% 
   mutate(mo = as.double(mo))  %>%
-  arrange(id, mo)
+  arrange(id, mo) # 855
 
 ###########################
 ####Local fence density####
@@ -165,7 +180,7 @@ for (i in unique(pronghorn$id_mo)[669:length(unique(pronghorn$id_mo))]){
 pronghorn.sum <- hr_fence_density %>% separate(id_mo, sep = "-", c("id", "mo")) %>%
   mutate(mo = as.double(mo)) %>% right_join(pronghorn.sum)
 
-write.csv(pronghorn.sum, "./result/prong_df_glmm.csv")
+#write_csv(pronghorn.sum, "G:/My Drive/RESEARCH/Pronghorn/BaBA_Season2/result/prong_df_glmm.csv")
 ##############################################
 ############## intial visualization ##########
 ##############################################
@@ -177,7 +192,7 @@ pronghorn.sum %>%
   theme_minimal() 
 
 pronghorn.sum %>% 
-  ggplot (aes(x = total_step_lengths, y = normal_rate)) +
+  ggplot (aes(x = normal_rate, y = total_step_lengths)) +
   geom_point() + 
   geom_smooth(method = "lm") +
   theme_minimal() 
