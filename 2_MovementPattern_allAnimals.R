@@ -143,18 +143,18 @@ get_density <- function(polygon, line) {
 }
 
 # calculate time differences - prep data for BBMM
-pronghorn <- pronghorn %>% group_by(id_mo) %>% 
+pronghorn <- pronghorn %>% group_by(id_yr_mo) %>% 
   mutate(time.lag = (date - lag(date, default = date[1]))/60) %>%
   filter(time.lag != 0)
 
 # for each animal-month, run bbmm and get line density within the 99% BBMM
 hr_fence_density <- data.frame() # create an empty list for density
-for (i in unique(pronghorn$id_mo)[669:length(unique(pronghorn$id_mo))]){
-  animal.i <- pronghorn %>% filter(id_mo == i)
+for (i in unique(pronghorn$id_yr_mo)){
+  animal.i <- pronghorn %>% filter(id_yr_mo == i)
   
   BBMM = brownian.bridge(x=animal.i$Easting, y=animal.i$Northing, 
                          time.lag=as.numeric(animal.i$time.lag),location.error=30, cell.size = 100)  
-  ### ask HALL how to set the location error ##################
+  ### --------- ask HALL whether 30 is good ----- ##################
   
   # get 99% contour and turn it into polygon
   contours <- bbmm.contour(BBMM, levels=c(99), locations=locations, plot=FALSE)
@@ -177,8 +177,7 @@ for (i in unique(pronghorn$id_mo)[669:length(unique(pronghorn$id_mo))]){
   print(i)
 }
 
-pronghorn.sum <- hr_fence_density %>% separate(id_mo, sep = "-", c("id", "mo")) %>%
-  mutate(mo = as.double(mo)) %>% right_join(pronghorn.sum)
+pronghorn.sum <- hr_fence_density %>% right_join(pronghorn.sum)
 
 #write_csv(pronghorn.sum, "G:/My Drive/RESEARCH/Pronghorn/BaBA_Season2/result/prong_df_glmm.csv")
 ##############################################
