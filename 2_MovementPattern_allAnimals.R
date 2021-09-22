@@ -21,9 +21,10 @@ pronghorn <- read_csv("./data/pronghorn_2h_pts.csv") %>%
          yr = year(date),
          dy = day(date),
          id_yr_mo = paste0(Animal.ID, "-", yr, "-", mo)) %>% 
-  # filter(!is.na(date), (yr == 2014 | yr == 2016)) %>%   ##### why did I only select 2014 and 2016? it might not be necessary
-  filter(!is.na(date)) 
-#  filter(Animal.ID != "PAPO_138")
+  filter(!is.na(date)) %>%
+  filter(Animal.ID != "PAPO_138") %>% 
+  filter (!(Anmal.ID %in% c("PAPO_163-2016-1", "PAPO_163-2016-2", 
+                            "PAPO_164-2016-1", "PAPO_164-2016-2"))) #bad gps data
 
 # remove individual month that is not complete (at least have 28-day data in a month)
 pronghorn1 <- pronghorn %>% dplyr::select(id_yr_mo, dy) %>% 
@@ -149,7 +150,7 @@ pronghorn <- pronghorn %>% group_by(id_yr_mo) %>%
 
 # for each animal-month, run bbmm and get line density within the 99% BBMM
 hr_fence_density <- data.frame() # create an empty list for density
-for (i in unique(pronghorn$id_yr_mo)){
+for (i in unique(pronghorn$id_yr_mo)[835: length(unique(pronghorn$id_yr_mo))]){
   animal.i <- pronghorn %>% filter(id_yr_mo == i)
   
   BBMM = brownian.bridge(x=animal.i$Easting, y=animal.i$Northing, 
@@ -173,25 +174,27 @@ for (i in unique(pronghorn$id_yr_mo)){
   #get density 
   density <- get_density(contour, fence)
   
-  hr_fence_density <- rbind(hr_fence_density, data.frame(id_mo = i, fence_density = density))
+  hr_fence_density <- rbind(hr_fence_density, data.frame(id_yr_mo = i, fence_density = density))
   print(i)
 }
 
-pronghorn.sum <- hr_fence_density %>% right_join(pronghorn.sum)
+pronghorn.sum <- hr_fence_density %>% right_join(pronghorn.sum) %>%
+  filter(!is.na(fence_density), !is.na(total_encounter)) # 822.
 
 #write_csv(pronghorn.sum, "G:/My Drive/RESEARCH/Pronghorn/BaBA_Season2/result/prong_df_glmm.csv")
-##############################################
-############## intial visualization ##########
-##############################################
 
-pronghorn.sum %>% 
-  ggplot (aes(x = max_displacement, y = normal_rate)) +
-  geom_point() + 
-  geom_smooth(method = "lm") +
-  theme_minimal() 
-
-pronghorn.sum %>% 
-  ggplot (aes(x = normal_rate, y = total_step_lengths)) +
-  geom_point() + 
-  geom_smooth(method = "lm") +
-  theme_minimal() 
+# ##############################################
+# ############## intial visualization ##########
+# ##############################################
+# 
+# pronghorn.sum %>% 
+#   ggplot (aes(x = max_displacement, y = normal_rate)) +
+#   geom_point() + 
+#   geom_smooth(method = "lm") +
+#   theme_minimal() 
+# 
+# pronghorn.sum %>% 
+#   ggplot (aes(x = normal_rate, y = total_step_lengths)) +
+#   geom_point() + 
+#   geom_smooth(method = "lm") +
+#   theme_minimal() 
